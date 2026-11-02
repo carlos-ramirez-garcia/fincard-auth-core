@@ -20,7 +20,8 @@ connect ficard/ficard@localhost/FREEPDB1
 --   5211000000001234 -> 51 INSUFFICIENT_FUNDS (monto > saldo)
 --   4111111111111111 -> 07 CARD_BLOCKED (early-decline Java)
 --   4024007196559937 -> 54 CARD_EXPIRED (derivado, exp 01/25)
---   3782822463100051 -> credito (saldo = deuda)
+--   3782822463100051 -> credito (saldo = deuda, limite 5000:
+--   disponible = 1527.5; aprobar monto <= ese, declinar 51 el resto)
 ------------------------------------------------------------
 DELETE FROM cards;
 
@@ -32,6 +33,6 @@ INSERT INTO cards (card_number, card_expiry, status, card_type, balance) VALUES 
 
 INSERT INTO cards (card_number, card_expiry, status, card_type, balance) VALUES ('4024007196559937', '01/25', 'ACTIVE', 'DEBIT', 1000);
 
-INSERT INTO cards (card_number, card_expiry, status, card_type, balance) VALUES ('3782822463100051', '10/27', 'ACTIVE', 'CREDIT', 3472.5);
+INSERT INTO cards (card_number, card_expiry, status, card_type, balance, credit_limit) VALUES ('3782822463100051', '10/27', 'ACTIVE', 'CREDIT', 3472.5, 5000);
 
 COMMIT;
