@@ -186,24 +186,7 @@ Condiciones de contrato sobre el request: `cardNumber` 13-19 dígitos, `cardExpi
 
 ---
 
-## Estado del proyecto (checklist de entregables)
 
-- [x] Fase 0 — entorno (Java 21, Maven, Docker, Git instalado)
-- [x] Fase 1 — schema Oracle + procedure PL/SQL (compilado y probado con 6 escenarios)
-- [x] Fase 2 — contratos: OpenAPI REST + contrato del evento Kafka
-- [x] Fase 3 — multi-módulo Maven (2 microservicios) compilando
-- [x] Fase 4 — `authorization-core` completo: DTOs/validación, Redis cache, DAO→procedure, controllers, **outbox→Kafka**, **JWT HS256 + Swagger**
-- [x] Fase 4 verificada **end-to-end en vivo** (APPROVED → bitácora → outbox SENT → evento en el topic; DECLINED 51 solo en bitácora)
-- [x] Fase 5 — `transaction-audit`: DDL `audit_transactions` (UNIQUE = idempotencia BD), `AuditConsumer` idempotente por `transactionId`, `AuditDao` (check-then-insert), verificado bilateramente EN VIVO (evento histórico rescatado por `earliest` + evento caliente de 9 s de punta a punta)
-- [x] Fase 6 — docker-compose completo (oracle auto-init con ./sql montado + redis + kafka KRaft dual-listener + core + audit, redes, healthchecks con `condition: service_healthy`, env vars por relaxed binding): **verificado EN CONTAINERS end-to-end** (APPROVED → bitácora → outbox SENT → audit recibido; Redis write-through visible) — `docker compose up -d` y todo arriba
-- [x] ~~Nota de pulido compose~~ — **auto-init RESUELTO y verificado desde volumen cero**: root era el convenio (gvenzl usa `/container-entrypoint-initdb.d`, no `/opt/oracle/scripts/startup` que es de las imágenes oficiales) + los scripts se auto-conectan con `connect ficard/ficard@localhost/FREEPDB1` (gvenzl los corre como SYS en el CDB — instrucción oficial del maintainer). Verificado: `down -v` → `up -d` → 5 tarjetas + procedure + audit solo, y el flujo API green (APPROVED → audit)
-- [x] Dockerfiles multi-stage (core + audit, cache de capas por poms; primera corrida ~8 min con descarga, siguientes ~1 min por cache compartido)
-- [x] Fase 7 — tests: **14 en core + 4 en audit = 18/18 verdes**
-  - unitarios Mockito: `AuthorizationServiceTest` (6), `TransactionEventServiceTest` (5, outbox + resiliencia), `AuditConsumerTest` (4, idempotencia doble-capa)
-  - integración: `AuthorizationIntegrationTest` (3, `@SpringBootTest` + MockMvc: 401 sin JWT, flujo completo con token del DevTokenController, 400 por validación)
-- [x] Pulienda menor — handler 405 `METHOD_NOT_ALLOWED` (GlobalExceptionHandler), secret JWT → placeholder `local-only-DO-NOT-USE-IN-PROD` (repositorio público listo), auto-init del compose verificado (arriba)
-- [x] Sección **Producción: escalabilidad, resiliencia y observabilidad** (abajo; requisito del enunciado E)
-- [ ] Opcional — `NewTopic(partitions=3)` en ambos apps para eliminar el race de particiones en primer boot; mini-insert de early-declines (ADR-0006)
 
 ## ~18 tests verdes
 
