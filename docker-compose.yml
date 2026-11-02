@@ -1,0 +1,126 @@
+# ============================================================
+# FICARD - todo el sistema con un solo comando:
+#   docker compose up -d
+# (derriba con: docker compose down -v  -- -v borra DB/kafka data)
+# ============================================================
+
+services:
+
+  # ------------------------------------------------------------
+  # ORACLE 23ai - arranca vacio y se AUTO-INIT:
+  # refresher: gvenzl ejecuta todo lo que haya en
+  # Los scripts ./sql se ejecutan automaticamente en /container-entrypoint-initdb.d
+  # al PRIMER arranque (convenio gvenzl, estilo postgres: .sql en orden alfabetico,
+  # volumen fresco → schema + procedure + audit + seed)
+  # NOTA: /opt/oracle/scripts/startup es convenio de las imagenes OFICIALES de
+  # Oracle — con las gvenzl NO corre (root cause de la deuda de Fase 6)
+  # ------------------------------------------------------------
+  oracle:
+    image: gvenzl/oracle-free:23.7-slim-faststart
+    ports:
+      - "1521:1521"
+    environment:
+      ORACLE_PASSWORD: admin
+      APP_USER: ficard                # el usuario de los microservicios, listo de fábrica
+      APP_USER_PASSWORD: ficard
+    volumes:
+      - ./sql:/container-entrypoint-initdb.d   # auto-init gvenzl: DDL + procedure + audit + seed
+      - oracle-data:/opt/oracle/oradata     # ← los datos SOBREVIVEN a recrear el container
+    healthcheck:
+      test: ["CMD", "healthcheck.sh"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 60s               # la DB tarda ~1 min en primera civilización
+    restart: unless-stopped
+
+  # ------------------------------------------------------------
+  # REDIS - simple, sin estado
+  # ------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli ping | grep PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  # ------------------------------------------------------------
+  # KAFKA (KRaft single-node) - DOS listeners:
+  #   PLAINTEXT (29092): para los APPS adentro de la red del compose
+  #   EXTERNAL  (9092):  para ti desde la máquina (sql-cli, Kafka console consumer, etc.)
+  # El ADVERTISED listener es LA pieza que suele morder: el broker
+  # le dice al cliente "conectate a XF" y si el nombre que anuncia
+  # no es resoluble desde donde el cliente está → la
+  # red nace roja aunque el broker este vivo.
+  # ------------------------------------------------------------
+  kafka:
+    image: apache/kafka:4.0.0
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:29093
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENERS: PLAINTEXT://:29092,CONTROLLER://:29093,EXTERNAL://:9092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,EXTERNAL://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/localhost/9092'"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 20s
+    restart: unless-stopped
+
+  # ------------------------------------------------------------
+  # AUTHORIZATION-CORE
+  # la imagen ya construida; TODA config se inyecta por ENV
+  # (relaxed binding: SPRING_DATASOURCE_URL <- spring.datasource.url)
+  # los yml de cada módulo quedan como DEFAULTS, el compose gana
+  # ------------------------------------------------------------
+  authorization-core:
+    image: fincard/authorization-core:1.0.0
+    ports:
+      - "8080:8080"
+    environment:
+      SPRING_PROFILES_ACTIVE: local                         # ← DevTokenController vivo en la caja
+      SPRING_DATASOURCE_URL: jdbc:oracle:thin:@//oracle:1521/FREEPDB1   # ← NOMBRE de servicio, no "localhost"!
+      SPRING_DATA_REDIS_HOST: redis
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      FINCARD_SECURITY_JWT_SECRET: "fincard-dev-secret-cambia-esto-32-bytes-min"
+    depends_on:
+      oracle:
+        condition: service_healthy                          # no arranco hasta que la DB responda
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ------------------------------------------------------------
+  # TRANSACTION-AUDIT (el mismo patrón, otro módulo)
+  # ------------------------------------------------------------
+  transaction-audit:
+    image: fincard/transaction-audit:1.0.0
+    ports:
+      - "8081:8081"
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:oracle:thin:@//oracle:1521/FREEPDB1
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+    depends_on:
+      oracle:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  oracle-data:        # volumen nombrado: la DB vive en Docker, persiste entre `down`/`up`

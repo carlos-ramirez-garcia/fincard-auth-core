@@ -1,0 +1,7 @@
+target/
+.idea/
+*.iml
+.git/
+docs/
+**/target/
+docker-compose.yml
