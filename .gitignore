@@ -1,0 +1,26 @@
+# build output
+target/
+*.class
+*.jar!/META-INF/
+
+# IDE
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+.settings/
+.classpath
+.project
+
+# OS
+Thumbs.db
+.DS_Store
+
+# logs
+*.log
+logs/
+
+# local secrets (el valor real del JWT secret viaja por ENV/secret-manager)
+*.secret
+.env

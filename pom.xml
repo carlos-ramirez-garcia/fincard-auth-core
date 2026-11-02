@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <!-- Hereda dependencyManagement + build config de todo el ecosistema
+         Spring (e.g. spring-boot-maven-plugin, JUnit, jackson, etc.).
+         Cambia UNA version aca y toda la plataforma actualiza. -->
+    <parent>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-parent</artifactId>
+        <version>3.4.5</version>
+        <relativePath/>
+    </parent>
+
+    <groupId>com.fincard</groupId>
+    <artifactId>fincard-auth</artifactId>
+    <version>1.0.0</version>
+    <packaging>pom</packaging>
+    <name>fincard-auth</name>
+    <description>FinCard Tech - Transactional Authorization Core (prototype)</description>
+
+    <modules>
+        <module>authorization-core</module>
+        <module>transaction-audit</module>
+    </modules>
+
+    <properties>
+        <java.version>21</java.version>
+        <!-- Versiones que spring-boot-parent NO gestiona por nosotros -->
+        <springdoc.version>2.8.6</springdoc.version>
+        <ojdbc.version>23.7.0.25.01</ojdbc.version>
+    </properties>
+
+    <!-- Single source of truth para versiones compartidas entre modulos.
+         Los hijos declaran groupId/artifactId, nunca la version. -->
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>org.springdoc</groupId>
+                <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
+                <version>${springdoc.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.oracle.database.jdbc</groupId>
+                <artifactId>ojdbc11</artifactId>
+                <version>${ojdbc.version}</version>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+
+    <build>
+        <pluginManagement>
+            <plugins>
+                <plugin>
+                    <groupId>org.springframework.boot</groupId>
+                    <artifactId>spring-boot-maven-plugin</artifactId>
+                    <configuration>
+                        <excludes>
+                            <!-- Nunca meter lombok dentro del fat jar -->
+                            <exclude>
+                                <groupId>org.projectlombok</groupId>
+                                <artifactId>lombok</artifactId>
+                            </exclude>
+                        </excludes>
+                    </configuration>
+                </plugin>
+            </plugins>
+        </pluginManagement>
+    </build>
+</project>
