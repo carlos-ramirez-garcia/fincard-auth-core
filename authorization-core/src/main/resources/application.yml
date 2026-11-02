@@ -1,0 +1,40 @@
+# Authorization Core - configuracion local (Fase 3: solo lo imprescindible)
+server:
+  port: 8080
+
+spring:
+  application:
+    name: authorization-core
+  datasource:
+    url: jdbc:oracle:thin:@//localhost:1521/FREEPDB1   # elemento `fincard-oracle` del compose
+    username: ficard
+    password: ficard                                    # en prod: ENV (comentar esto en el ADR)
+  data:
+    redis:
+      host: localhost
+      port: 6379
+  kafka:
+    bootstrap-servers: localhost:9092
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+  profiles:
+    active: local
+
+fincard:
+  security:
+    jwt:
+      secret: ${JWT_SECRET:local-only-DO-NOT-USE-IN-PROD-32bytes}   # el valor real viaja por ENV/secret-manager (compose ya lo inyecta)
+      # en prod: env var FINCARD_SECURITY_JWT_SECRET
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+  api-docs:
+    path: /v3/api-docs
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
