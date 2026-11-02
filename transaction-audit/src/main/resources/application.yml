@@ -1,0 +1,24 @@
+# Transaction Audit - configuracion local (Fase 3: solo lo imprescindible)
+server:
+  port: 8081
+
+spring:
+  application:
+    name: transaction-audit
+  datasource:
+    url: jdbc:oracle:thin:@//localhost:1521/FREEPDB1
+    username: ficard
+    password: ficard
+  kafka:
+    bootstrap-servers: localhost:9092
+    consumer:
+      group-id: fincard-audit            # ﹘cada consumidor medio-identidad: grupo Aislado
+      key-deserializer:   org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      auto-offset-reset: earliest        # ← LEE desde el HISTORY del topic (los eventos ya publicados)
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
