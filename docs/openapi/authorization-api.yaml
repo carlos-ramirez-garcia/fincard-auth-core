@@ -1,0 +1,348 @@
+openapi: 3.0.3
+info:
+  title: FinCard Authorization Core API
+  description: |
+    API de autorización de pagos con tarjeta del adquirente FinCard Tech.
+
+    Un emisor (POS, pasarela, servicio del adquirente) envía una transacción y
+    recibe la decisión en tiempo real: se verifica que la tarjeta exista, esté
+    activa, no esté vencida y tenga fondos o cupo disponible.
+
+    ## Reglas de negocio
+    - La decisión de negocio vive en la respuesta: `decision` es `APPROVED` o
+      `DECLINED`. Un rechazo **no** es un error HTTP — se responde `200` con
+      `decision=DECLINED` y `declineCode` (fondos, vigencia, estado, tarjeta
+      inexistente), igual que un switch real de tarjetas.
+    - Los códigos HTTP `4xx/5xx` se reservan para errores de contrato o
+      transporte (petición malformada, ausencia de token, fallo interno).
+    - Una tarjeta vence al final del mes de vencimiento: una transacción del
+      día siguiente al final de ese mes se rechaza con `CARD_EXPIRED`.
+    - Si la transacción se aprueba, el saldo/cupo se actualiza de forma
+      atómica y un evento se publica de forma asíncrona para auditoría y
+      notificaciones.
+    - El número de tarjeta (PAN) solo viaja en la petición por HTTPS. En las
+      respuestas y registros se retorna siempre enmascarado
+      (ej. `4539**********6467`).
+
+    ## Seguridad
+    Todos los endpoints exigen un token JWT válido en el encabezado
+    `Authorization: Bearer <token>`.
+
+    ## Errores
+    Toda respuesta de error comparte el esquema `ErrorResponse`
+    (código de negocio legible + mensaje + timestamp).
+  version: 1.0.0
+  contact:
+    name: FinCard Tech
+servers:
+  - url: http://localhost:8080
+    description: Local (docker compose)
+
+security:
+  - bearerAuth: []
+
+tags:
+  - name: authorizations
+    description: Autorización de transacciones de pago
+  - name: cards
+    description: Diagnóstico del estado de una tarjeta (incluye cacheHit de Redis)
+
+paths:
+  /api/v1/card-authorizations:
+    post:
+      tags: [authorizations]
+      summary: Autoriza (o rechaza) una transacción de pago
+      description: |
+        Evalúa la transacción contra vigencia, estado y fondos de la tarjeta.
+
+        La respuesta HTTP es `200 OK` siempre que la petición sea
+        contractualmente válida; la decisión (aprobada/declinada) viaja en
+        el cuerpo. `authorizationCode` va presente solo si la transacción
+        fue `APPROVED`.
+      operationId: authorizeCardTransaction
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CardAuthorizationRequest'
+            examples:
+              approvedDebit:
+                summary: Débito con fondos — se aprueba
+                value:
+                  cardNumber: "4539148803436467"
+                  cardExpiry: "10/29"
+                  amount: 100.00
+                  currency: "USD"
+                  merchantId: "MERCH-001"
+                  merchantName: "Amazon"
+              declinedInsufficientFunds:
+                summary: Débito sin fondos — declinada 51
+                value:
+                  cardNumber: "5211000000001234"
+                  cardExpiry: "10/29"
+                  amount: 999.00
+                  currency: "USD"
+                  merchantId: "MERCH-001"
+                  merchantName: "Apple Store"
+      responses:
+        '200':
+          description: Transacción evaluada (aprobada o declinada — ver decision)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CardAuthorizationResponse'
+              examples:
+                approved:
+                  summary: decision=APPROVED (authorizationCode presente)
+                  value:
+                    transactionId: "8c1f5f4e-6f9a-4b3c-9b0a-2d4e6f8a1b2c"
+                    decision: "APPROVED"
+                    responseCode: "00"
+                    authorizationCode: "KD9Z2F"
+                    remainingBalance: 1900.00
+                    timestamp: "2026-10-31T12:00:00Z"
+                declined:
+                  summary: decision=DECLINED (declineCode presente)
+                  value:
+                    transactionId: "0d2e6f5d-7a0b-4c4d-8c1b-3e5f7a9b2c3d"
+                    decision: "DECLINED"
+                    responseCode: "51"
+                    declineCode: "INSUFFICIENT_FUNDS"
+                    remainingBalance: 42.50
+                    timestamp: "2026-10-31T12:00:01Z"
+        '400':
+          description: Petición malformada o campos fuera de rango
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                code: "INVALID_REQUEST"
+                message: "amount must be greater than 0"
+                timestamp: "2026-10-31T12:00:00Z"
+        '401':
+          description: Token JWT ausente, expirado o inválido
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                code: "UNAUTHORIZED"
+                message: "Missing or invalid Bearer token"
+                timestamp: "2026-10-31T12:00:00Z"
+        '500':
+          description: Error interno no controlado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                code: "INTERNAL_ERROR"
+                message: "Unexpected error. Please retry."
+                timestamp: "2026-10-31T12:00:00Z"
+
+  /api/v1/cards/{cardNumber}:
+    get:
+      tags: [cards]
+      summary: Diagnóstico del estado de una tarjeta
+      description: |
+        Retorna estado, vigencia y balance disponible usando la misma capa de
+        caché que usa la autorización.
+
+        `cacheHit=true` indica que el dato vino de la caché (Redis) y no
+        desde la base de datos — útil para demostrar la optimización de
+        lecturas recurrentes.
+      operationId: getCardStatus
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: cardNumber
+          in: path
+          required: true
+          description: PAN completo (13–19 dígitos)
+          schema:
+            type: string
+            minLength: 13
+            maxLength: 19
+            pattern: "^[0-9]+$"
+          example: "4539148803436467"
+      responses:
+        '200':
+          description: Estado actual de la tarjeta
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CardStatusResponse'
+              example:
+                maskedCardNumber: "4539**********6467"
+                status: "ACTIVE"
+                currentBalance: 1900.00
+                availableBalance: 1900.00
+                currency: "USD"
+                cacheHit: false
+        '401':
+          description: Token JWT ausente, expirado o inválido
+        '404':
+          description: Tarjeta no registrada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                code: "CARD_NOT_FOUND"
+                message: "No card is registered with this number"
+                timestamp: "2026-10-31T12:00:00Z"
+        '500':
+          description: Error interno no controlado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    CardAuthorizationRequest:
+      type: object
+      description: Petición de autorización. Los montos usan decimal exacto (máx. 2 decimales).
+      required: [cardNumber, cardExpiry, amount, currency, merchantId]
+      properties:
+        cardNumber:
+          type: string
+          description: |
+            Número de tarjeta (PAN), solo dígitos, 13–19 posiciones.
+            Se transmite por HTTPS; nunca se logea ni se retorna completo.
+          minLength: 13
+          maxLength: 19
+          pattern: "^[0-9]+$"
+          example: "4539148803436467"
+        cardExpiry:
+          type: string
+          description: Vigencia de la tarjeta en formato MM/yy
+          pattern: "^(0[1-9]|1[0-2])\\/[0-9]{2}$"
+          example: "10/29"
+        amount:
+          type: number
+          format: double
+          description: Monto de la transacción, mayor a 0, con hasta 2 decimales
+          minimum: 0.01
+          multipleOf: 0.01
+          example: 100.00
+        currency:
+          type: string
+          description: Moneda ISO 4217 en 3 letras
+          minLength: 3
+          maxLength: 3
+          example: "USD"
+        merchantId:
+          type: string
+          description: Identificador del comercio
+          maxLength: 40
+          example: "MERCH-001"
+        merchantName:
+          type: string
+          description: Nombre comercial para el registro de auditoría (opcional)
+          maxLength: 120
+          example: "Amazon"
+
+    CardAuthorizationResponse:
+      type: object
+      required: [transactionId, decision, timestamp]
+      properties:
+        transactionId:
+          type: string
+          format: uuid
+          description: Identificador único de la transacción (generado por el core)
+        decision:
+          type: string
+          enum: [APPROVED, DECLINED]
+          description: |
+            Decisión de negocio. `DECLINED` llega con HTTP 200 — los
+            códigos HTTP se reservan para errores de contrato/transporte.
+        responseCode:
+          type: string
+          maxLength: 2
+          description: |
+            Código de respuesta estilo ISO 8583:
+            `00` aprobada, `51` fondos, `07` tarjeta bloqueada,
+            `54` vencida, `14` tarjeta no encontrada, `96` error de sistema
+          example: "00"
+        declineCode:
+          type: string
+          enum: [INSUFFICIENT_FUNDS, CARD_BLOCKED, CARD_EXPIRED, CARD_NOT_FOUND, SYSTEM_ERROR]
+          description: Razón de negocio; presente solo cuando decision=DECLINED
+        authorizationCode:
+          type: string
+          maxLength: 6
+          description: Código de autorización; presente solo cuando decision=APPROVED
+          example: "KD9Z2F"
+        remainingBalance:
+          type: number
+          format: double
+          description: |
+            Saldo o cupo disponible resultante de la evaluación (post-cargo
+            si se aprobó; disponible si se declinó)
+          example: 1900.00
+        timestamp:
+          type: string
+          format: date-time
+          description: Momento de la decisión (UTC)
+
+    CardStatusResponse:
+      type: object
+      required: [maskedCardNumber, status, currentBalance, availableBalance, currency]
+      properties:
+        maskedCardNumber:
+          type: string
+          description: PAN enmascarado; el PAN completo jamás se retorna
+          example: "4539**********6467"
+        status:
+          type: string
+          enum: [ACTIVE, BLOCKED, EXPIRED]
+          description: |
+            Estado operacional. `EXPIRED` es derivado (fecha actual vs
+            vigencia), no un estado persistido.
+        currentBalance:
+          type: number
+          format: double
+          description: Saldo actual (débito) o deuda (crédito)
+        availableBalance:
+          type: number
+          format: double
+          description: |
+            Disponible transactable: balance (débito) o creditLimit −
+            balance (crédito)
+        currency:
+          type: string
+          example: "USD"
+        cacheHit:
+          type: boolean
+          description: >
+            true si el dato provino de la caché (Redis) — evidencia de la
+            optimización de lecturas recurrentes
+
+    ErrorResponse:
+      type: object
+      description: Envelope único de error para toda la API
+      required: [code, message, timestamp]
+      properties:
+        code:
+          type: string
+          description: Código de empresa legible (INVALID_REQUEST, UNAUTHORIZED, CARD_NOT_FOUND, INTERNAL_ERROR)
+          example: "INVALID_REQUEST"
+        message:
+          type: string
+          description: Mensaje humano sin información sensible
+          example: "amount must be greater than 0"
+        timestamp:
+          type: string
+          format: date-time
+          description: Momento del error (UTC)

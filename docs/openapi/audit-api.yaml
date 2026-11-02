@@ -1,0 +1,110 @@
+openapi: 3.0.3
+info:
+  title: Transaction Audit API
+  description: |
+    Servicio de auditoría ASÍNCRONA del ecosistema FICARD.
+    No expone escritura: sus datos nacen del consumo del topic
+    `transaction-events` (contrato: docs/events/transaction-events.md).
+  version: 1.0.0
+servers:
+  - url: http://localhost:8081
+    description: Local (IDE/compose)
+
+paths:
+  /api/v1/audit:
+    get:
+      summary: Consultar transacciones auditadas (APPROVED recibidas por Kafka)
+      operationId: listAudit
+      parameters:
+        - name: cardNumber
+          in: query
+          description: Filtra por PAN completo; el servicio hace el enmascaramiento para exponerlo. Opcional: si se omite, devuelve las últimas.
+          schema:
+            type: string
+            minLength: 13
+            maxLength: 19
+            pattern: '^[0-9]+$'
+        - name: limit
+          in: query
+          description: Máximo de filas (default 20, tope 100)
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        '200':
+          description: Lista (posible lista vacía — auditado hasta el momento)
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AuditEntry'
+        '400':
+          description: Parámetro inválido
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Error interno
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+components:
+  schemas:
+    AuditEntry:
+      type: object
+      description: Espejo de audit_transactions — lo que el audit grabó por cada evento APPROVED consumido.
+      required: [transactionId, maskedCardNumber, decision, responseCode, amount, currency, merchantId, receivedAt]
+      properties:
+        transactionId:
+          type: string
+          format: uuid
+        maskedCardNumber:
+          type: string
+          description: PAN siempre enmascarado (ej. 4539****6467)
+        decision:
+          type: string
+          enum: [APPROVED, DECLINED]
+          description: Hoy solo llega APPROVED (garantía 1 del productor)
+        responseCode:
+          type: string
+        authorizationCode:
+          type: string
+          description: Solo APPROVED
+        declineCode:
+          type: string
+          description: Solo DECLINED
+        amount:
+          type: number
+          format: double
+        currency:
+          type: string
+        merchantId:
+          type: string
+        merchantName:
+          type: string
+        transactionTs:
+          type: string
+          format: date-time
+          description: Timestamp de la transacción origen (claim del evento)
+        receivedAt:
+          type: string
+          format: date-time
+          description: Cuando el audit lo grabó (SYSTIMESTAMP local)
+
+    ErrorResponse:
+      type: object
+      required: [code, message, timestamp]
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
