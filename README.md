@@ -261,7 +261,16 @@ Resource requests: core ~512Mi-1Gi, 500m-1 CPU por pod
 ---
 
 ## Frontend - Fincard Web POS (Angular 22)
+Autorizacion de pago
 <img width="1503" height="721" alt="imagen1" src="https://github.com/user-attachments/assets/8152b396-1609-4b22-9ba1-c33c954152f7" />
+
+Consulta de tarjetas
+<img width="1919" height="579" alt="imagen3" src="https://github.com/user-attachments/assets/d70fda88-561b-4127-9f16-f052fb725c71" />
+
+Consulta de transacciones
+<img width="1899" height="421" alt="imagen2" src="https://github.com/user-attachments/assets/23b6bff7-82f7-499d-a93d-9c8d157ecabe" />
+
+
 
 
 
