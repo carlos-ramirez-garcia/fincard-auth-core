@@ -262,10 +262,57 @@ Resource requests: core ~512Mi-1Gi, 500m-1 CPU por pod
 
 ## Frontend - Fincard Web POS (Angular 22)
 
-- **Repositorio:** `https://github.com/carlos-ramirez-garcia/fincard-web-pos`
-- **Stack:** Angular 22 (standalone, signals), custom SCSS tema fintech < 300 líneas, sin Material.
-- **Rutas (lazy‑load):** `checkout` – formulario de simulación de pago; `card` – tarjeta visual con estado y badge ⚡ Redis cache‑aside / 🗄️ DB read; `audit` – tabla con polling 15 s, filtro POR PAN, eventos APPROVED/DECLINED.
-- **Proxy:** `proxy.conf.json` → `/api` → 8080, `/audit-api` → 8081 (sin tocar CORS del backend).
-- **Build:** `ng build` ✅ (bundle ~92 kB gzip + lazy chunks por ruta, 10‑21 kB).
-- **E2e verificado contra compose:** token → auth → outbox → Kafka → auditoría; chips “Débito activo 75” → APPROVED; “Saldo corto 100” → DECLINED 51; “Crédito 20” → APPROVED con badge ⚡ Redis cache‑aside.
-- **Nota:** El front‑end se entregó como prototipo adicional; el entregable oficial de esta entrega es el backend `fincard-auth-core`.
+**Repositorio:** `https://github.com/carlos-ramirez-garcia/fincard-web-pos`
+
+**Stack tecnológico:**
+- **Framework:** Angular 22 (versión 22.x.x), enfoque *standalone* (sin módulos NgModule tradicionales), uso de **Signals** para gestión reactiva del estado.
+- **Estilo:** SCSS personalizado, tema fintech oscuro, sin Material UI. Los estilos principales están en `src/styles.scss` y las variables compartidas en `src/_tokens.scss` (paleta de colores: `$bg`, `$panel`, `$border`, `$muted`, `$accent`, `$accent2`, `$ok`, `$bad`, `$warn`). El estilo está diseñado para ser vistoso pero funcional, con menos de 300 líneas de CSS efectivo.
+- **Enrutado:** Aplicación de una sola página con enrutamiento *lazy‑load* de Angular. Tres rutas principales:
+  - `/checkout` – formulario de simulación de pago con validaciones reactivas (patrones de PAN, MM/YY, monto mínimo, moneda de 3 letras, merchantId obligatorio).
+  - `/card` – vista de tarjeta visual que muestra el estado de una de las 5 tarjetas semilla (PAN enmascarado, saldo, badge ⚡ Redis cache‑aside / 🗄️ DB read, badge de estado ACTIVE/BLOCKED).
+  - `/audit` – tabla de auditoría con filas de eventos APPROVED/DECLINED, filtro por PAN, *polling* automático cada 15 s, botón de “Refrescar”.
+
+**Proxy y configuración de red:**
+- Se utiliza un archivo `proxy.conf.json` en la raíz del proyecto para enrutar llamadas API hacia el backend:
+  - `/api` → `http://localhost:8080` (microservicio `authorization‑core`).
+  - `/audit-api` → `http://localhost:8081` (microservicio `transaction‑audit`).
+- Esto permite trabajar sin configurar CORS en el backend y simplifica el desarrollo local.
+
+**Servicios y lógica de negocio (archivo `src/app/core/`):**
+- `DevTokenService`: obtiene y cachea el token JWT del endpoint `POST /api/v1/dev/tokens` (perfil `local`), con renovación anticipada a los 60 s de expirar y patrón *single‑flight* para peticiones concurrentes.
+- `authInterceptor`: interceptor HTTP que adjunta automáticamente `Authorization: Bearer <token>` a todas las peticiones a `/api/*`, excepto al DevToken; ante un 401, invalida el cache y propone re‑obtener el token.
+- `apiErrorInterceptor`: interceptor HTTP que captura errores HTTP (`400, 401, 404, 500`), extrae el cuerpo `ErrorResponse` (`code, message, timestamp`) y lo normaliza a `ApiFailure` para su visualización en la UI.
+- `AuthorizationService`: wrapper que llama a `POST /api/v1/cards/authorizations` (con cuerpo DTO) y `GET /api/v1/cards/:pan` (snapshot de la tarjeta).
+- `AuditService`: wrapper que llama a `GET /audit-api/api/v1/audit` con query‑param opcional `?cardNumber=`.
+
+**Modelos TypeScript (`src/app/core/models.ts`):**
+- `CardAuthorizationRequest`, `CardAuthorizationResponse`, `ErrorResponse`, `ApiFailure`.
+- Enums: `DeclineCode` (`00`, `51`, `07`, `54`, `14`), `CardStatus` (`ACTIVE`, `BLOCKED`), `CardType` (`DEBIT`, `CREDIT`).
+- Vista‑vista `Snapshot` para la tarjeta: `pan`, `expiry`, `status`, `balance`, `currency`, `cacheHit`.
+
+**Enrutamiento (`src/app/app.routes.ts`):**
+- Tres rutas definidas con `loadComponent` (carga perezosa):
+  - `path: 'checkout'` → `CheckoutComponent`.
+  - `path: 'card'` → `CardComponent`.
+  - `path: 'audit'` → `AuditComponent`.
+- Ruta por defecto `''` redirige a `/checkout`.
+
+**Vista y estilo (`src/app/app.html`, `src/app/app.scss`, `src/styles.scss`):**
+- `app.html` es el esquema de la aplicación: un `header` con el nombre “FintCard POS”, un menú de navegación con enlaces a las tres rutas, y un `main` con el `router-outlet`.
+- `app.scss` define variables globales y estilos de layout; `styles.scss` importa `$tokens.scss` y contiene la paleta de colores y los estilos de componentes (cards, badges, inputs, tabla de auditoría, etc.), todo en menos de 300 líneas de CSS efectivo.
+- El diseño es *fintech oscuro*: fondo oscuro (`#0b1120`), colores de acento `$accent` (`#5eead4`) y `$accent2` (`#38bdf8`), colores de éxito `$ok` (`#34d399`) y error `$bad` (`#f87171`).
+
+**Build y verificación:**
+- `ng build` genera el bundle en `dist/fincard-web` (~92 kB gzip) más *lazy chunks* por ruta (checkout ~21 KB, card ~10 KB, audit ~13 KB).
+- Verificación end‑to‑end contra el compose (5 contenedores saludables):
+  - Obtención de token (`POST /api/v1/dev/tokens`).
+  - Autorización exitosa (chips “Débito activo 75” → `APPROVED`, `00`, saldo `1675.00`).
+  - Autorización denegada (chips “Saldo corto 100” → `DECLINED`, `51`, `INSUFFICIENT_FUNDS`).
+  - Visualización de tarjeta (badge ⚡ Redis cache‑aside / 🗄️ DB read).
+  - Tabla de auditoría (`/audit`) con *polling* cada 15 s, filtro por PAN y eventos APPROVED/DECLINED.
+- Comando de desarrollo: `npx.cmd ng serve --port 4200`.
+- Comando de producción: `npx.cmd ng build` (output en `dist/fincard-web`).
+
+**Nota final:**
+- El front‑end fue desarrollado como prototipo adicional para validar el flujo completo de autorización, caché y auditoría contra el backend `fincard-auth-core`.
+- El entregable oficial de esta entrega es el backend `fincard-auth-core`; el frontend se incluyó como referencia y para validar el funcionamiento integrado.
