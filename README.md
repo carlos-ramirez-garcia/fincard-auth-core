@@ -257,3 +257,15 @@ Resource requests: core ~512Mi-1Gi, 500m-1 CPU por pod
 ```
 
 *Nota honesta del prototipo: esta sección describe el camino a producción; el compose con 5 containers es el artefacto de demo funcional que corre el enunciado.*
+
+---
+
+## Frontend - Fincard Web POS (Angular 22)
+
+- **Repositorio:** `https://github.com/carlos-ramirez-garcia/fincard-web-pos`
+- **Stack:** Angular 22 (standalone, signals), custom SCSS tema fintech < 300 líneas, sin Material.
+- **Rutas (lazy‑load):** `checkout` – formulario de simulación de pago; `card` – tarjeta visual con estado y badge ⚡ Redis cache‑aside / 🗄️ DB read; `audit` – tabla con polling 15 s, filtro POR PAN, eventos APPROVED/DECLINED.
+- **Proxy:** `proxy.conf.json` → `/api` → 8080, `/audit-api` → 8081 (sin tocar CORS del backend).
+- **Build:** `ng build` ✅ (bundle ~92 kB gzip + lazy chunks por ruta, 10‑21 kB).
+- **E2e verificado contra compose:** token → auth → outbox → Kafka → auditoría; chips “Débito activo 75” → APPROVED; “Saldo corto 100” → DECLINED 51; “Crédito 20” → APPROVED con badge ⚡ Redis cache‑aside.
+- **Nota:** El front‑end se entregó como prototipo adicional; el entregable oficial de esta entrega es el backend `fincard-auth-core`.
